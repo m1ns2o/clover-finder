@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Camera, CheckCircle2, Code2, Image, Leaf, Play, RotateCcw, Upload, XCircle } from 'lucide-vue-next'
+import { Camera, CheckCircle2, Code2, Download, Image, Leaf, Play, RotateCcw, Upload, XCircle } from 'lucide-vue-next'
 import CodeEditor from '@/components/CodeEditor.vue'
 import { defaultProgramSource, localizeProgramSource, parseConditionProgram, runConditionProgram } from '@/lib/conditionRunner'
 import { loadSavedCode, saveCode } from '@/lib/storage'
@@ -8,11 +8,18 @@ import { analyzeImage, captureVideoFrame, getSampleImagePath, preloadOpenCv } fr
 import type { CloverAnalysis } from '@/types/clover'
 import type { ProgramIssue, RunTrace } from '@/types/condition'
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed', platform: string }>
+}
+
 const sourceCode = ref(localizeProgramSource(loadSavedCode(defaultProgramSource)))
 const parseIssues = ref<ProgramIssue[]>([])
 const runTrace = ref<RunTrace | null>(null)
 const analysis = ref<CloverAnalysis | null>(null)
 const captureOpen = ref(false)
+const installPrompt = ref<BeforeInstallPromptEvent | null>(null)
+const isStandalone = ref(false)
 const cameraError = ref('')
 const isCameraReady = ref(false)
 const isAnalyzing = ref(false)
@@ -37,6 +44,7 @@ const isPositiveResult = computed(() => {
   const text = selectedResult.value
   return /적합|행운|성공|맞음|통과/.test(text) && !/않|아님|실패/.test(text)
 })
+const canInstall = computed(() => Boolean(installPrompt.value) && !isStandalone.value)
 
 watch(sourceCode, value => {
   saveCode(value)
@@ -178,11 +186,44 @@ function waitForUi(): Promise<void> {
   })
 }
 
+async function installPwa(): Promise<void> {
+  const promptEvent = installPrompt.value
+  if (!promptEvent) {
+    return
+  }
+
+  await promptEvent.prompt()
+  await promptEvent.userChoice
+  installPrompt.value = null
+}
+
+function updateStandaloneState(): void {
+  const navigatorWithStandalone = window.navigator as Navigator & { standalone?: boolean }
+  isStandalone.value = window.matchMedia('(display-mode: standalone)').matches || navigatorWithStandalone.standalone === true
+}
+
+function handleBeforeInstallPrompt(event: Event): void {
+  event.preventDefault()
+  installPrompt.value = event as BeforeInstallPromptEvent
+}
+
+function handleAppInstalled(): void {
+  installPrompt.value = null
+  isStandalone.value = true
+}
+
 onMounted(() => {
+  updateStandaloneState()
+  window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+  window.addEventListener('appinstalled', handleAppInstalled)
   void preloadOpenCv()
 })
 
-onBeforeUnmount(stopCamera)
+onBeforeUnmount(() => {
+  stopCamera()
+  window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+  window.removeEventListener('appinstalled', handleAppInstalled)
+})
 </script>
 
 <template>
@@ -195,6 +236,10 @@ onBeforeUnmount(stopCamera)
         <p class="eyebrow">Clover Logic Lab</p>
         <h1>조건문으로 클로버 판정하기</h1>
       </div>
+      <button v-if="canInstall" type="button" class="install-button" @click="installPwa">
+        <Download :size="17" />
+        설치
+      </button>
     </header>
 
     <section class="workbench">

@@ -24,6 +24,7 @@ Nuxt를 제거하고 Vue/Vite로 다시 구축한 모바일 PWA입니다.
 - 로컬 개발: `http://localhost:4173` 또는 `http://localhost:4187`
 - 휴대폰 실기기 테스트: HTTPS 배포 URL 권장
 - 같은 와이파이의 `http://192.168.x.x` 주소에서는 카메라가 막힐 수 있으며, 이 경우 이미지 업로드 또는 기본 테스트 이미지를 사용합니다.
+- Android Chrome의 PWA 설치 버튼도 HTTPS 배포 URL에서 확인해야 합니다. 같은 와이파이의 `http://192.168.x.x` 주소는 설치 가능 앱으로 보이지 않을 수 있습니다.
 
 ## 실행
 
@@ -31,6 +32,17 @@ Nuxt를 제거하고 Vue/Vite로 다시 구축한 모바일 PWA입니다.
 pnpm install
 pnpm dev
 ```
+
+## Netlify 배포
+
+`netlify.toml`에 Netlify 빌드 설정을 포함했습니다.
+
+- Build command: `pnpm build`
+- Publish directory: `dist`
+- Node: `22`
+- pnpm: `10.33.2`
+
+Netlify 대시보드에서 저장소를 연결하면 위 설정이 자동으로 적용됩니다. 카메라 기능은 HTTPS에서 동작하므로 Netlify 배포 URL에서는 바로 테스트할 수 있습니다.
 
 ## 검증
 
