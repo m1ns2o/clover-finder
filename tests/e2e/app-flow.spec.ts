@@ -1,4 +1,7 @@
 import { expect, test } from '@playwright/test'
+import { existsSync } from 'node:fs'
+
+const referenceThreeLeafPhoto = 'KakaoTalk_Photo_2026-04-28-10-35-11.jpeg'
 
 test('loads saved code and runs the default test image', async ({ page }) => {
   await page.goto('/')
@@ -40,7 +43,7 @@ test('ignores a separated stem-shaped contour', async ({ page }) => {
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 900">
       <rect width="900" height="900" fill="#fbfbf4"/>
       <g transform="translate(450 360)">
-        <path d="M0 180 C-12 280 -28 370 -62 500" stroke="#4f8e48" stroke-width="38" stroke-linecap="round" fill="none"/>
+        <path d="M0 112 C-12 242 -28 370 -62 500" stroke="#4f8e48" stroke-width="58" stroke-linecap="round" fill="none"/>
         <ellipse cx="-128" cy="-108" rx="130" ry="104" transform="rotate(-34 -128 -108)" fill="#2d965e"/>
         <ellipse cx="128" cy="-112" rx="132" ry="106" transform="rotate(34 128 -112)" fill="#319e65"/>
         <ellipse cx="-132" cy="98" rx="128" ry="106" transform="rotate(31 -132 98)" fill="#35a269"/>
@@ -61,6 +64,49 @@ test('ignores a separated stem-shaped contour', async ({ page }) => {
   await expect(page.locator('.result-card')).toBeVisible({ timeout: 10_000 })
   await expect(page.locator('.metrics-grid')).toContainText('4개')
   await expect(page.locator('.leaf-marker')).toHaveCount(4)
+  const markerTops = await page.locator('.leaf-marker').evaluateAll(markers =>
+    markers.map(marker => Number.parseFloat((marker as HTMLElement).style.top))
+  )
+  expect(Math.max(...markerTops)).toBeLessThan(72)
+})
+
+test('does not count a small leaf-gap bridge as a fourth leaf', async ({ page }) => {
+  const threeLeafWithBridge = Buffer.from(`
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 900">
+      <rect width="900" height="900" fill="#fbfbf4"/>
+      <g transform="translate(450 460)">
+        <path d="M-12 128 C-76 238 -142 334 -216 430" stroke="#5f974d" stroke-width="40" stroke-linecap="round" fill="none"/>
+        <ellipse cx="-150" cy="92" rx="132" ry="108" transform="rotate(-22 -150 92)" fill="#2f8f58"/>
+        <ellipse cx="116" cy="-118" rx="132" ry="108" transform="rotate(25 116 -118)" fill="#2d8c55"/>
+        <ellipse cx="176" cy="146" rx="138" ry="112" transform="rotate(-20 176 146)" fill="#2b854f"/>
+        <ellipse cx="-34" cy="-12" rx="42" ry="36" transform="rotate(-28 -34 -12)" fill="#4a9846"/>
+      </g>
+    </svg>
+  `)
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '실행' }).click()
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'three-leaf-with-bridge.svg',
+    mimeType: 'image/svg+xml',
+    buffer: threeLeafWithBridge
+  })
+
+  await expect(page.locator('.result-card')).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('.metrics-grid')).toContainText('3개')
+  await expect(page.locator('.leaf-marker')).toHaveCount(3)
+})
+
+test('classifies the provided three-leaf reference photo as three leaves', async ({ page }) => {
+  test.skip(!existsSync(referenceThreeLeafPhoto), 'reference photo is only available in the local workspace')
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '실행' }).click()
+  await page.locator('input[type="file"]').setInputFiles(referenceThreeLeafPhoto)
+
+  await expect(page.locator('.result-card')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.metrics-grid')).toContainText('3개')
+  await expect(page.locator('.leaf-marker')).toHaveCount(3)
 })
 
 test('handles a large uploaded image without freezing', async ({ page }) => {

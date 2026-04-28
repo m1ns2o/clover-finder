@@ -1,7 +1,13 @@
 import type { CloverAnalysis, CloverMetrics, LeafRegion } from '@/types/clover'
 import opencvRuntimeUrl from '@techstark/opencv-js/dist/opencv.js?url'
 
-type RawLeafRegion = Omit<LeafRegion, 'xPercent' | 'yPercent' | 'radiusPercent'>
+interface RawLeafRegion extends Omit<LeafRegion, 'xPercent' | 'yPercent' | 'radiusPercent'> {
+  width?: number
+  height?: number
+  aspectRatio?: number
+  circularity?: number
+  extent?: number
+}
 
 interface OpenCvWorkerSuccess {
   id: number
@@ -177,6 +183,8 @@ function analyzeWithCanvasData(imageData: ImageData, imageUrl: string): CloverAn
     mask[pixel] = alpha > 30 && greenDominant && saturated ? 255 : 0
   }
 
+  suppressStemPixels(mask, imageData.width, imageData.height)
+
   return makeAnalysis(splitByAngle(mask, imageData.width, imageData.height), imageUrl, 'canvas', imageData.width, imageData.height)
 }
 
@@ -229,6 +237,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 }
 
 function splitByAngle(mask: Uint8Array, width: number, height: number): RawLeafRegion[] {
+  suppressStemPixels(mask, width, height)
   const rawCenter = calculateMaskCenter(mask, width, height)
 
   if (!rawCenter.total) {
@@ -312,7 +321,106 @@ function calculateMaskCenter(
 
 function isLikelyStemPixel(dx: number, dy: number, width: number, height: number): boolean {
   const maxSide = Math.max(width, height)
-  return dy > maxSide * 0.07 && Math.abs(dx) < Math.max(maxSide * 0.035, dy * 0.52)
+  return dy > maxSide * 0.055 && Math.abs(dx) < Math.max(maxSide * 0.055, dy * 0.62)
+}
+
+function suppressStemPixels(mask: Uint8Array, width: number, height: number): void {
+  const bounds = getMaskBounds(mask, width, height)
+  if (!bounds) {
+    return
+  }
+
+  const boxWidth = bounds.maxX - bounds.minX + 1
+  const boxHeight = bounds.maxY - bounds.minY + 1
+  if (boxWidth < 8 || boxHeight < 8) {
+    return
+  }
+
+  const rowCounts = new Uint16Array(height)
+  const rowSums = new Float64Array(height)
+  let maxRowCount = 0
+
+  for (let index = 0; index < mask.length; index += 1) {
+    if (!mask[index]) {
+      continue
+    }
+
+    const x = index % width
+    const y = Math.floor(index / width)
+    rowCounts[y] += 1
+    rowSums[y] += x
+    maxRowCount = Math.max(maxRowCount, rowCounts[y] ?? 0)
+  }
+
+  if (!maxRowCount) {
+    return
+  }
+
+  const crownLimitY = Math.round(bounds.minY + boxHeight * 0.68)
+  const crownCenter = calculateMaskCenter(mask, width, height, (_x, y) => y <= crownLimitY)
+  const crownX = crownCenter.total ? crownCenter.cx : (bounds.minX + bounds.maxX) / 2
+  const crownY = crownCenter.total ? crownCenter.cy : (bounds.minY + bounds.maxY) / 2
+  const startY = Math.max(bounds.minY, Math.round(crownY + Math.max(boxHeight * 0.07, Math.max(width, height) * 0.025)))
+  const baseNarrowLimit = Math.max(8, Math.min(maxRowCount * 0.46, boxWidth * 0.3))
+
+  for (let y = startY; y <= bounds.maxY; y += 1) {
+    const rowCount = rowCounts[y] ?? 0
+    if (!rowCount) {
+      continue
+    }
+
+    const rowCenter = rowSums[y]! / rowCount
+    const dy = y - crownY
+    const rowIsTail = dy > boxHeight * 0.18 && rowCount < maxRowCount * 0.42 && Math.abs(rowCenter - crownX) < Math.max(boxWidth * 0.28, dy * 0.7)
+
+    let x = bounds.minX
+    while (x <= bounds.maxX) {
+      const index = y * width + x
+      if (!mask[index]) {
+        x += 1
+        continue
+      }
+
+      const runStart = x
+      while (x <= bounds.maxX && mask[y * width + x]) {
+        x += 1
+      }
+      const runEnd = x - 1
+      const runWidth = runEnd - runStart + 1
+      const runCenter = (runStart + runEnd) / 2
+      const nearStemAxis = Math.abs(runCenter - crownX) < Math.max(boxWidth * 0.2, dy * 0.58)
+      const narrowRun = runWidth <= Math.max(baseNarrowLimit, maxRowCount * 0.32)
+      const lowerNarrowRun = dy > boxHeight * 0.28 && runWidth < maxRowCount * 0.58
+
+      if ((nearStemAxis && (narrowRun || lowerNarrowRun)) || rowIsTail) {
+        for (let clearX = runStart; clearX <= runEnd; clearX += 1) {
+          mask[y * width + clearX] = 0
+        }
+      }
+    }
+  }
+}
+
+function getMaskBounds(mask: Uint8Array, width: number, height: number): { minX: number; maxX: number; minY: number; maxY: number } | null {
+  let minX = width
+  let maxX = -1
+  let minY = height
+  let maxY = -1
+
+  for (let index = 0; index < mask.length; index += 1) {
+    if (!mask[index]) {
+      continue
+    }
+
+    const x = index % width
+    const y = Math.floor(index / width)
+    minX = Math.min(minX, x)
+    maxX = Math.max(maxX, x)
+    minY = Math.min(minY, y)
+    maxY = Math.max(maxY, y)
+  }
+
+  return maxX >= minX && maxY >= minY ? { minX, maxX, minY, maxY } : null
 }
 
 function makeAnalysis(
@@ -370,13 +478,71 @@ function filterStemRegionCandidates(regions: RawLeafRegion[], imageWidth: number
   const cy = center.weight ? center.y / center.weight : imageHeight / 2
   const maxSide = Math.max(imageWidth, imageHeight)
 
-  return regions.filter(region => {
+  const stemFiltered = regions.filter(region => {
     const areaRatio = region.area / maxArea
     const dx = Math.abs(region.cx - cx)
     const dy = region.cy - cy
     const belowCenter = dy > maxSide * 0.12
     const nearMiddle = dx < Math.max(maxSide * 0.08, Math.abs(dy) * 0.48)
-    return !(areaRatio < 0.42 && belowCenter && nearMiddle)
+    const slenderLowerCandidate = Boolean(region.aspectRatio && region.aspectRatio > 1.9 && region.height && region.height > region.width!)
+    const weakShape = Boolean(region.circularity && region.circularity < 0.56) || Boolean(region.extent && region.extent < 0.46)
+    return !((areaRatio < 0.62 && belowCenter && nearMiddle) || (belowCenter && nearMiddle && slenderLowerCandidate && weakShape))
+  })
+
+  return filterSmallInteriorBridgeCandidates(stemFiltered)
+}
+
+function filterSmallInteriorBridgeCandidates(regions: RawLeafRegion[]): RawLeafRegion[] {
+  if (regions.length <= 3) {
+    return regions
+  }
+
+  const sorted = [...regions].sort((a, b) => b.area - a.area)
+  const maxArea = sorted[0]?.area ?? 1
+  const strongRegions = sorted.filter(region => region.area >= maxArea * 0.58)
+
+  if (strongRegions.length < 3) {
+    return regions
+  }
+
+  const bounds = strongRegions.reduce((acc, region) => ({
+    minX: Math.min(acc.minX, region.cx),
+    maxX: Math.max(acc.maxX, region.cx),
+    minY: Math.min(acc.minY, region.cy),
+    maxY: Math.max(acc.maxY, region.cy)
+  }), {
+    minX: Number.POSITIVE_INFINITY,
+    maxX: Number.NEGATIVE_INFINITY,
+    minY: Number.POSITIVE_INFINITY,
+    maxY: Number.NEGATIVE_INFINITY
+  })
+  const center = strongRegions.reduce((acc, region) => {
+    acc.x += region.cx
+    acc.y += region.cy
+    return acc
+  }, { x: 0, y: 0 })
+  const centerX = center.x / strongRegions.length
+  const centerY = center.y / strongRegions.length
+  const averageDistance = strongRegions.reduce((sum, region) => {
+    return sum + Math.hypot(region.cx - centerX, region.cy - centerY)
+  }, 0) / strongRegions.length
+  const margin = Math.max(8, averageDistance * 0.35)
+
+  return regions.filter(region => {
+    const areaRatio = region.area / maxArea
+    if (areaRatio >= 0.52) {
+      return true
+    }
+
+    const insideStrongCluster = region.cx >= bounds.minX - margin
+      && region.cx <= bounds.maxX + margin
+      && region.cy >= bounds.minY - margin
+      && region.cy <= bounds.maxY + margin
+    const distanceFromCore = Math.hypot(region.cx - centerX, region.cy - centerY)
+    const closeToCore = averageDistance > 0 && distanceFromCore < averageDistance * 0.98
+    const lowShapeConfidence = !region.circularity || region.circularity < 0.72 || !region.extent || region.extent < 0.58
+
+    return !(insideStrongCluster && closeToCore && lowShapeConfidence)
   })
 }
 
@@ -515,10 +681,110 @@ function makeOpenCvWorkerSource(source: string): string {
 
     function isLikelyStemPixel(dx, dy, width, height) {
       const maxSide = Math.max(width, height);
-      return dy > maxSide * 0.07 && Math.abs(dx) < Math.max(maxSide * 0.035, dy * 0.52);
+      return dy > maxSide * 0.055 && Math.abs(dx) < Math.max(maxSide * 0.055, dy * 0.62);
+    }
+
+    function getMaskBounds(mask, width, height) {
+      let minX = width;
+      let maxX = -1;
+      let minY = height;
+      let maxY = -1;
+
+      for (let index = 0; index < mask.length; index += 1) {
+        if (!mask[index]) {
+          continue;
+        }
+
+        const x = index % width;
+        const y = Math.floor(index / width);
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+      }
+
+      return maxX >= minX && maxY >= minY ? { minX, maxX, minY, maxY } : null;
+    }
+
+    function suppressStemPixels(mask, width, height) {
+      const bounds = getMaskBounds(mask, width, height);
+      if (!bounds) {
+        return;
+      }
+
+      const boxWidth = bounds.maxX - bounds.minX + 1;
+      const boxHeight = bounds.maxY - bounds.minY + 1;
+      if (boxWidth < 8 || boxHeight < 8) {
+        return;
+      }
+
+      const rowCounts = new Uint16Array(height);
+      const rowSums = new Float64Array(height);
+      let maxRowCount = 0;
+
+      for (let index = 0; index < mask.length; index += 1) {
+        if (!mask[index]) {
+          continue;
+        }
+
+        const x = index % width;
+        const y = Math.floor(index / width);
+        rowCounts[y] += 1;
+        rowSums[y] += x;
+        maxRowCount = Math.max(maxRowCount, rowCounts[y]);
+      }
+
+      if (!maxRowCount) {
+        return;
+      }
+
+      const crownLimitY = Math.round(bounds.minY + boxHeight * 0.68);
+      const crownCenter = calculateMaskCenter(mask, width, height, (_x, y) => y <= crownLimitY);
+      const crownX = crownCenter.total ? crownCenter.cx : (bounds.minX + bounds.maxX) / 2;
+      const crownY = crownCenter.total ? crownCenter.cy : (bounds.minY + bounds.maxY) / 2;
+      const startY = Math.max(bounds.minY, Math.round(crownY + Math.max(boxHeight * 0.07, Math.max(width, height) * 0.025)));
+      const baseNarrowLimit = Math.max(8, Math.min(maxRowCount * 0.46, boxWidth * 0.3));
+
+      for (let y = startY; y <= bounds.maxY; y += 1) {
+        const rowCount = rowCounts[y] || 0;
+        if (!rowCount) {
+          continue;
+        }
+
+        const rowCenter = rowSums[y] / rowCount;
+        const dy = y - crownY;
+        const rowIsTail = dy > boxHeight * 0.18 && rowCount < maxRowCount * 0.42 && Math.abs(rowCenter - crownX) < Math.max(boxWidth * 0.28, dy * 0.7);
+
+        let x = bounds.minX;
+        while (x <= bounds.maxX) {
+          const index = y * width + x;
+          if (!mask[index]) {
+            x += 1;
+            continue;
+          }
+
+          const runStart = x;
+          while (x <= bounds.maxX && mask[y * width + x]) {
+            x += 1;
+          }
+          const runEnd = x - 1;
+          const runWidth = runEnd - runStart + 1;
+          const runCenter = (runStart + runEnd) / 2;
+          const nearStemAxis = Math.abs(runCenter - crownX) < Math.max(boxWidth * 0.2, dy * 0.58);
+          const narrowRun = runWidth <= Math.max(baseNarrowLimit, maxRowCount * 0.32);
+          const lowerNarrowRun = dy > boxHeight * 0.28 && runWidth < maxRowCount * 0.58;
+
+          if ((nearStemAxis && (narrowRun || lowerNarrowRun)) || rowIsTail) {
+            for (let clearX = runStart; clearX <= runEnd; clearX += 1) {
+              mask[y * width + clearX] = 0;
+            }
+          }
+        }
+      }
     }
 
     function splitByAngle(mask, width, height) {
+      suppressStemPixels(mask, width, height);
       const rawCenter = calculateMaskCenter(mask, width, height);
 
       if (!rawCenter.total) {
@@ -609,11 +875,13 @@ function makeOpenCvWorkerSource(source: string): string {
         kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE || 2, new cv.Size(5, 5));
         cv.morphologyEx(mask, mask, cv.MORPH_OPEN, kernel);
         cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, kernel);
+        suppressStemPixels(mask.data, mask.cols, mask.rows);
         const leafKernelSizeBase = Math.max(7, Math.min(15, Math.round(Math.min(width, height) * 0.035)));
         const leafKernelSize = leafKernelSizeBase % 2 ? leafKernelSizeBase : leafKernelSizeBase + 1;
         leafKernel = cv.getStructuringElement(cv.MORPH_ELLIPSE || 2, new cv.Size(leafKernelSize, leafKernelSize));
         cv.morphologyEx(mask, leafMask, cv.MORPH_OPEN, leafKernel);
         cv.morphologyEx(leafMask, leafMask, cv.MORPH_CLOSE, kernel);
+        suppressStemPixels(leafMask.data, leafMask.cols, leafMask.rows);
         const analysisMask = cv.countNonZero(leafMask) > Math.max(40, (width * height) / 1000) ? leafMask : mask;
         cv.findContours(analysisMask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
@@ -626,11 +894,20 @@ function makeOpenCvWorkerSource(source: string): string {
 
           if (area >= minArea && isLeafContourCandidate(cv, contour, area, width, height)) {
             const moments = cv.moments(contour);
+            const rect = cv.boundingRect(contour);
+            const rectWidth = Math.max(1, rect.width);
+            const rectHeight = Math.max(1, rect.height);
+            const perimeter = cv.arcLength(contour, true);
             regions.push({
               id: 'leaf-' + (regions.length + 1),
               area,
               cx: moments.m00 ? moments.m10 / moments.m00 : width / 2,
-              cy: moments.m00 ? moments.m01 / moments.m00 : height / 2
+              cy: moments.m00 ? moments.m01 / moments.m00 : height / 2,
+              width: rectWidth,
+              height: rectHeight,
+              aspectRatio: Math.max(rectWidth / rectHeight, rectHeight / rectWidth),
+              circularity: perimeter ? (4 * Math.PI * area) / (perimeter * perimeter) : 0,
+              extent: area / Math.max(1, rectWidth * rectHeight)
             });
           }
 
