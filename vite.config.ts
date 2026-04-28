@@ -20,7 +20,44 @@ export default defineConfig({
         theme_color: '#0f5132',
         background_color: '#f5faf6',
         display: 'standalone',
+        display_override: ['standalone', 'minimal-ui'],
         orientation: 'portrait-primary',
+        categories: ['education', 'productivity', 'utilities'],
+        prefer_related_applications: false,
+        handle_links: 'preferred',
+        launch_handler: {
+          client_mode: 'focus-existing'
+        },
+        shortcuts: [
+          {
+            name: '클로버 검사 시작',
+            short_name: '검사',
+            description: '저장된 조건문으로 클로버 사진을 검사합니다.',
+            url: '/'
+          },
+          {
+            name: '개인정보 보호 안내',
+            short_name: '개인정보',
+            description: '카메라와 이미지 처리 방식 안내를 확인합니다.',
+            url: '/privacy.html'
+          }
+        ],
+        screenshots: [
+          {
+            src: '/screenshots/mobile-home.png',
+            sizes: '540x960',
+            type: 'image/png',
+            form_factor: 'narrow',
+            label: '조건문 코드 에디터'
+          },
+          {
+            src: '/screenshots/mobile-result.png',
+            sizes: '540x960',
+            type: 'image/png',
+            form_factor: 'narrow',
+            label: '클로버 분석 결과'
+          }
+        ],
         icons: [
           {
             src: '/pwa-64x64.png',

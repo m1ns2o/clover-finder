@@ -18,8 +18,11 @@ const parseIssues = ref<ProgramIssue[]>([])
 const runTrace = ref<RunTrace | null>(null)
 const analysis = ref<CloverAnalysis | null>(null)
 const captureOpen = ref(false)
+const installSheetOpen = ref(false)
 const installPrompt = ref<BeforeInstallPromptEvent | null>(null)
 const isStandalone = ref(false)
+const isIosDevice = ref(false)
+const isAndroidDevice = ref(false)
 const cameraError = ref('')
 const isCameraReady = ref(false)
 const isAnalyzing = ref(false)
@@ -45,6 +48,7 @@ const isPositiveResult = computed(() => {
   return /적합|행운|성공|맞음|통과/.test(text) && !/않|아님|실패/.test(text)
 })
 const canInstall = computed(() => Boolean(installPrompt.value) && !isStandalone.value)
+const canShowInstallHelp = computed(() => !isStandalone.value && (canInstall.value || isIosDevice.value || isAndroidDevice.value))
 
 watch(sourceCode, value => {
   saveCode(value)
@@ -189,6 +193,7 @@ function waitForUi(): Promise<void> {
 async function installPwa(): Promise<void> {
   const promptEvent = installPrompt.value
   if (!promptEvent) {
+    installSheetOpen.value = true
     return
   }
 
@@ -197,9 +202,22 @@ async function installPwa(): Promise<void> {
   installPrompt.value = null
 }
 
+function closeInstallSheet(): void {
+  installSheetOpen.value = false
+}
+
 function updateStandaloneState(): void {
   const navigatorWithStandalone = window.navigator as Navigator & { standalone?: boolean }
   isStandalone.value = window.matchMedia('(display-mode: standalone)').matches || navigatorWithStandalone.standalone === true
+}
+
+function updatePlatformState(): void {
+  const userAgent = window.navigator.userAgent
+  const platform = window.navigator.platform
+  const iPadOnModernSafari = platform === 'MacIntel' && window.navigator.maxTouchPoints > 1
+
+  isIosDevice.value = /iPad|iPhone|iPod/.test(userAgent) || iPadOnModernSafari
+  isAndroidDevice.value = /Android/.test(userAgent)
 }
 
 function handleBeforeInstallPrompt(event: Event): void {
@@ -214,6 +232,7 @@ function handleAppInstalled(): void {
 
 onMounted(() => {
   updateStandaloneState()
+  updatePlatformState()
   window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
   window.addEventListener('appinstalled', handleAppInstalled)
   void preloadOpenCv()
@@ -236,7 +255,7 @@ onBeforeUnmount(() => {
         <p class="eyebrow">Clover Logic Lab</p>
         <h1>조건문으로 클로버 판정하기</h1>
       </div>
-      <button v-if="canInstall" type="button" class="install-button" @click="installPwa">
+      <button v-if="canShowInstallHelp" type="button" class="install-button" @click="installPwa">
         <Download :size="17" />
         설치
       </button>
@@ -352,6 +371,36 @@ onBeforeUnmount(() => {
           <Image :size="19" />
           테스트
         </button>
+      </div>
+    </section>
+
+    <section v-if="installSheetOpen" class="install-sheet" aria-label="앱 설치 안내">
+      <div class="sheet-head">
+        <div>
+          <p class="eyebrow">Install</p>
+          <h2>홈 화면에 설치</h2>
+        </div>
+        <button type="button" class="close-button" @click="closeInstallSheet">닫기</button>
+      </div>
+
+      <div class="install-guide">
+        <template v-if="isIosDevice">
+          <p><b>iPhone/iPad</b></p>
+          <ol>
+            <li>Safari에서 이 주소를 엽니다.</li>
+            <li>공유 버튼을 누릅니다.</li>
+            <li>홈 화면에 추가를 선택합니다.</li>
+          </ol>
+        </template>
+        <template v-else>
+          <p><b>Android</b></p>
+          <ol>
+            <li>Chrome 또는 Samsung Internet에서 HTTPS 주소를 엽니다.</li>
+            <li>브라우저 메뉴에서 앱 설치 또는 홈 화면에 추가를 선택합니다.</li>
+            <li>기존 설치 실패 기록이 있으면 사이트 데이터를 삭제한 뒤 다시 시도합니다.</li>
+          </ol>
+        </template>
+        <a href="/privacy.html" target="_blank" rel="noreferrer">개인정보 보호 안내 열기</a>
       </div>
     </section>
   </main>

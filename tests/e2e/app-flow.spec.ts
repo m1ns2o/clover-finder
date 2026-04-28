@@ -35,6 +35,34 @@ test('uploads an image file and keeps the app running', async ({ page }) => {
   await expect(page.locator('.capture-sheet')).toHaveCount(0)
 })
 
+test('ignores a separated stem-shaped contour', async ({ page }) => {
+  const cloverWithDetachedStem = Buffer.from(`
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 900">
+      <rect width="900" height="900" fill="#fbfbf4"/>
+      <g transform="translate(450 360)">
+        <path d="M0 180 C-12 280 -28 370 -62 500" stroke="#4f8e48" stroke-width="38" stroke-linecap="round" fill="none"/>
+        <ellipse cx="-128" cy="-108" rx="130" ry="104" transform="rotate(-34 -128 -108)" fill="#2d965e"/>
+        <ellipse cx="128" cy="-112" rx="132" ry="106" transform="rotate(34 128 -112)" fill="#319e65"/>
+        <ellipse cx="-132" cy="98" rx="128" ry="106" transform="rotate(31 -132 98)" fill="#35a269"/>
+        <ellipse cx="134" cy="94" rx="130" ry="104" transform="rotate(-31 134 94)" fill="#2f925c"/>
+        <circle cx="0" cy="0" r="42" fill="#247a4d"/>
+      </g>
+    </svg>
+  `)
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '실행' }).click()
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'clover-with-detached-stem.svg',
+    mimeType: 'image/svg+xml',
+    buffer: cloverWithDetachedStem
+  })
+
+  await expect(page.locator('.result-card')).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('.metrics-grid')).toContainText('4개')
+  await expect(page.locator('.leaf-marker')).toHaveCount(4)
+})
+
 test('handles a large uploaded image without freezing', async ({ page }) => {
   const largeCloverSvg = Buffer.from(`
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3000 3000">

@@ -229,27 +229,17 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 }
 
 function splitByAngle(mask: Uint8Array, width: number, height: number): RawLeafRegion[] {
-  let total = 0
-  let sx = 0
-  let sy = 0
+  const rawCenter = calculateMaskCenter(mask, width, height)
 
-  for (let index = 0; index < mask.length; index += 1) {
-    if (!mask[index]) {
-      continue
-    }
-    const x = index % width
-    const y = Math.floor(index / width)
-    total += 1
-    sx += x
-    sy += y
-  }
-
-  if (!total) {
+  if (!rawCenter.total) {
     return []
   }
 
-  const cx = sx / total
-  const cy = sy / total
+  const refinedCenter = calculateMaskCenter(mask, width, height, (x, y) => {
+    return !isLikelyStemPixel(x - rawCenter.cx, y - rawCenter.cy, width, height)
+  })
+  const cx = refinedCenter.total ? refinedCenter.cx : rawCenter.cx
+  const cy = refinedCenter.total ? refinedCenter.cy : rawCenter.cy
   const buckets = Array.from({ length: 4 }, (_, index) => ({
     id: `leaf-${index + 1}`,
     area: 0,
@@ -266,7 +256,7 @@ function splitByAngle(mask: Uint8Array, width: number, height: number): RawLeafR
     const y = Math.floor(index / width)
     const dx = x - cx
     const dy = y - cy
-    if (Math.hypot(dx, dy) < deadZone) {
+    if (Math.hypot(dx, dy) < deadZone || isLikelyStemPixel(dx, dy, width, height)) {
       continue
     }
 
@@ -278,7 +268,7 @@ function splitByAngle(mask: Uint8Array, width: number, height: number): RawLeafR
     bucket.sy += y
   }
 
-  const minBucketArea = Math.max(40, total / 12)
+  const minBucketArea = Math.max(40, rawCenter.total / 12)
   return buckets
     .filter(bucket => bucket.area >= minBucketArea)
     .map(bucket => ({
@@ -289,6 +279,42 @@ function splitByAngle(mask: Uint8Array, width: number, height: number): RawLeafR
     }))
 }
 
+function calculateMaskCenter(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  shouldInclude: (x: number, y: number) => boolean = () => true
+): { total: number; cx: number; cy: number } {
+  let total = 0
+  let sx = 0
+  let sy = 0
+
+  for (let index = 0; index < mask.length; index += 1) {
+    if (!mask[index]) {
+      continue
+    }
+    const x = index % width
+    const y = Math.floor(index / width)
+    if (!shouldInclude(x, y)) {
+      continue
+    }
+    total += 1
+    sx += x
+    sy += y
+  }
+
+  return {
+    total,
+    cx: total ? sx / total : width / 2,
+    cy: total ? sy / total : height / 2
+  }
+}
+
+function isLikelyStemPixel(dx: number, dy: number, width: number, height: number): boolean {
+  const maxSide = Math.max(width, height)
+  return dy > maxSide * 0.07 && Math.abs(dx) < Math.max(maxSide * 0.035, dy * 0.52)
+}
+
 function makeAnalysis(
   regions: RawLeafRegion[],
   imageUrl: string,
@@ -297,7 +323,7 @@ function makeAnalysis(
   imageHeight: number
 ): CloverAnalysis {
   const minSide = Math.max(1, Math.min(imageWidth, imageHeight))
-  const sorted = regions
+  const sorted = filterStemRegionCandidates(regions, imageWidth, imageHeight)
     .sort((a, b) => b.area - a.area)
     .slice(0, 6)
     .map(region => ({
@@ -325,6 +351,33 @@ function makeAnalysis(
     confidence,
     message
   }
+}
+
+function filterStemRegionCandidates(regions: RawLeafRegion[], imageWidth: number, imageHeight: number): RawLeafRegion[] {
+  if (regions.length <= 1) {
+    return regions
+  }
+
+  const maxArea = Math.max(...regions.map(region => region.area), 1)
+  const center = regions.reduce((acc, region) => {
+    const weight = Math.min(region.area, maxArea)
+    acc.weight += weight
+    acc.x += region.cx * weight
+    acc.y += region.cy * weight
+    return acc
+  }, { weight: 0, x: 0, y: 0 })
+  const cx = center.weight ? center.x / center.weight : imageWidth / 2
+  const cy = center.weight ? center.y / center.weight : imageHeight / 2
+  const maxSide = Math.max(imageWidth, imageHeight)
+
+  return regions.filter(region => {
+    const areaRatio = region.area / maxArea
+    const dx = Math.abs(region.cx - cx)
+    const dy = region.cy - cy
+    const belowCenter = dy > maxSide * 0.12
+    const nearMiddle = dx < Math.max(maxSide * 0.08, Math.abs(dy) * 0.48)
+    return !(areaRatio < 0.42 && belowCenter && nearMiddle)
+  })
 }
 
 function makeMetrics(leafSizes: number[]): CloverMetrics {
@@ -434,7 +487,7 @@ function makeOpenCvWorkerSource(source: string): string {
       return cvReadyPromise;
     }
 
-    function splitByAngle(mask, width, height) {
+    function calculateMaskCenter(mask, width, height, shouldInclude = () => true) {
       let total = 0;
       let sx = 0;
       let sy = 0;
@@ -445,17 +498,38 @@ function makeOpenCvWorkerSource(source: string): string {
         }
         const x = index % width;
         const y = Math.floor(index / width);
+        if (!shouldInclude(x, y)) {
+          continue;
+        }
         total += 1;
         sx += x;
         sy += y;
       }
 
-      if (!total) {
+      return {
+        total,
+        cx: total ? sx / total : width / 2,
+        cy: total ? sy / total : height / 2
+      };
+    }
+
+    function isLikelyStemPixel(dx, dy, width, height) {
+      const maxSide = Math.max(width, height);
+      return dy > maxSide * 0.07 && Math.abs(dx) < Math.max(maxSide * 0.035, dy * 0.52);
+    }
+
+    function splitByAngle(mask, width, height) {
+      const rawCenter = calculateMaskCenter(mask, width, height);
+
+      if (!rawCenter.total) {
         return [];
       }
 
-      const cx = sx / total;
-      const cy = sy / total;
+      const refinedCenter = calculateMaskCenter(mask, width, height, (x, y) => {
+        return !isLikelyStemPixel(x - rawCenter.cx, y - rawCenter.cy, width, height);
+      });
+      const cx = refinedCenter.total ? refinedCenter.cx : rawCenter.cx;
+      const cy = refinedCenter.total ? refinedCenter.cy : rawCenter.cy;
       const buckets = Array.from({ length: 4 }, (_, index) => ({
         id: 'leaf-' + (index + 1),
         area: 0,
@@ -472,7 +546,7 @@ function makeOpenCvWorkerSource(source: string): string {
         const y = Math.floor(index / width);
         const dx = x - cx;
         const dy = y - cy;
-        if (Math.hypot(dx, dy) < deadZone) {
+        if (Math.hypot(dx, dy) < deadZone || isLikelyStemPixel(dx, dy, width, height)) {
           continue;
         }
 
@@ -484,7 +558,7 @@ function makeOpenCvWorkerSource(source: string): string {
         bucket.sy += y;
       }
 
-      const minBucketArea = Math.max(40, total / 12);
+      const minBucketArea = Math.max(40, rawCenter.total / 12);
       return buckets
         .filter(bucket => bucket.area >= minBucketArea)
         .map(bucket => ({
@@ -495,6 +569,21 @@ function makeOpenCvWorkerSource(source: string): string {
         }));
     }
 
+    function isLeafContourCandidate(cv, contour, area, width, height) {
+      const rect = cv.boundingRect(contour);
+      const rectWidth = Math.max(1, rect.width);
+      const rectHeight = Math.max(1, rect.height);
+      const aspectRatio = Math.max(rectWidth / rectHeight, rectHeight / rectWidth);
+      const extent = area / Math.max(1, rectWidth * rectHeight);
+      const perimeter = cv.arcLength(contour, true);
+      const circularity = perimeter ? (4 * Math.PI * area) / (perimeter * perimeter) : 0;
+      const centerY = rect.y + rectHeight / 2;
+      const tooSlender = aspectRatio > 2.65 && (circularity < 0.5 || extent < 0.42);
+      const lowerSmallStroke = rectHeight > rectWidth * 1.9 && centerY > height * 0.48 && area < (width * height) / 32;
+
+      return !tooSlender && !lowerSmallStroke;
+    }
+
     function analyzeWithOpenCv(cv, message) {
       const width = message.width;
       const height = message.height;
@@ -503,9 +592,11 @@ function makeOpenCvWorkerSource(source: string): string {
       const rgb = new cv.Mat();
       const hsv = new cv.Mat();
       const mask = new cv.Mat();
+      const leafMask = new cv.Mat();
       let lower = null;
       let upper = null;
       let kernel = null;
+      let leafKernel = null;
       const contours = new cv.MatVector();
       const hierarchy = new cv.Mat();
 
@@ -518,7 +609,13 @@ function makeOpenCvWorkerSource(source: string): string {
         kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE || 2, new cv.Size(5, 5));
         cv.morphologyEx(mask, mask, cv.MORPH_OPEN, kernel);
         cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, kernel);
-        cv.findContours(mask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+        const leafKernelSizeBase = Math.max(7, Math.min(15, Math.round(Math.min(width, height) * 0.035)));
+        const leafKernelSize = leafKernelSizeBase % 2 ? leafKernelSizeBase : leafKernelSizeBase + 1;
+        leafKernel = cv.getStructuringElement(cv.MORPH_ELLIPSE || 2, new cv.Size(leafKernelSize, leafKernelSize));
+        cv.morphologyEx(mask, leafMask, cv.MORPH_OPEN, leafKernel);
+        cv.morphologyEx(leafMask, leafMask, cv.MORPH_CLOSE, kernel);
+        const analysisMask = cv.countNonZero(leafMask) > Math.max(40, (width * height) / 1000) ? leafMask : mask;
+        cv.findContours(analysisMask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
         const regions = [];
         const minArea = Math.max(28, (width * height) / 700);
@@ -527,7 +624,7 @@ function makeOpenCvWorkerSource(source: string): string {
           const contour = contours.get(index);
           const area = cv.contourArea(contour);
 
-          if (area >= minArea) {
+          if (area >= minArea && isLeafContourCandidate(cv, contour, area, width, height)) {
             const moments = cv.moments(contour);
             regions.push({
               id: 'leaf-' + (regions.length + 1),
@@ -540,15 +637,17 @@ function makeOpenCvWorkerSource(source: string): string {
           contour.delete();
         }
 
-        return regions.length >= 2 ? regions : splitByAngle(mask.data, mask.cols, mask.rows);
+        return regions.length >= 2 ? regions : splitByAngle(analysisMask.data, analysisMask.cols, analysisMask.rows);
       } finally {
         src.delete();
         rgb.delete();
         hsv.delete();
         mask.delete();
+        leafMask.delete();
         if (lower) lower.delete();
         if (upper) upper.delete();
         if (kernel) kernel.delete();
+        if (leafKernel) leafKernel.delete();
         contours.delete();
         hierarchy.delete();
       }

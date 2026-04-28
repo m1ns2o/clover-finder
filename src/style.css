@@ -116,7 +116,8 @@ h2 {
 
 .workbench,
 .result-panel,
-.capture-sheet {
+.capture-sheet,
+.install-sheet {
   border: 1px solid #dce8df;
   background: #ffffff;
   border-radius: 8px;
@@ -460,7 +461,8 @@ h2 {
   line-height: 1.45;
 }
 
-.capture-sheet {
+.capture-sheet,
+.install-sheet {
   position: fixed;
   right: 0;
   bottom: 0;
@@ -475,6 +477,35 @@ h2 {
   overflow-y: auto;
   border-bottom-right-radius: 0;
   border-bottom-left-radius: 0;
+}
+
+.install-sheet {
+  z-index: 45;
+}
+
+.install-guide {
+  display: grid;
+  gap: 10px;
+  color: #1c3325;
+  line-height: 1.5;
+}
+
+.install-guide p {
+  margin: 0;
+}
+
+.install-guide ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+.install-guide a {
+  justify-self: start;
+  color: #17633f;
+  font-weight: 900;
+  text-decoration: none;
 }
 
 .sheet-head {
