@@ -568,7 +568,7 @@ h2 {
   top: 0;
   z-index: 2;
   display: grid;
-  grid-template-columns: 1.2fr 1fr 1fr;
+  grid-template-columns: 1.1fr 1fr;
   gap: 8px;
   padding: 2px 0 4px;
   background: #ffffff;

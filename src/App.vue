@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Camera, CheckCircle2, Code2, Download, Image, Leaf, Play, RotateCcw, Upload, XCircle } from 'lucide-vue-next'
+import { Camera, CheckCircle2, Code2, Download, Leaf, Play, RotateCcw, Upload, XCircle } from 'lucide-vue-next'
 import CodeEditor from '@/components/CodeEditor.vue'
 import { defaultProgramSource, localizeProgramSource, parseConditionProgram, runConditionProgram } from '@/lib/conditionRunner'
 import { loadSavedCode, saveCode } from '@/lib/storage'
-import { analyzeImage, captureVideoFrame, getSampleImagePath, preloadOpenCv } from '@/lib/vision'
+import { analyzeImage, captureVideoFrame, preloadOpenCv } from '@/lib/vision'
 import type { CloverAnalysis } from '@/types/clover'
 import type { ProgramIssue, RunTrace } from '@/types/condition'
 
@@ -67,7 +67,7 @@ async function openCapture(): Promise<void> {
   captureOpen.value = true
   analysis.value = null
   runTrace.value = null
-  statusMessage.value = '카메라 또는 테스트 이미지로 클로버를 준비하세요.'
+  statusMessage.value = '카메라 또는 이미지 업로드로 클로버를 준비하세요.'
   await nextTick()
   await startCamera()
 }
@@ -78,7 +78,7 @@ async function startCamera(): Promise<void> {
   isCameraReady.value = false
 
   if (!window.isSecureContext) {
-    cameraError.value = '카메라는 HTTPS 또는 localhost에서만 실행됩니다. 이미지 업로드나 기본 테스트를 사용하세요.'
+    cameraError.value = '카메라는 HTTPS 또는 localhost에서만 실행됩니다. 이미지 업로드를 사용하세요.'
     return
   }
 
@@ -103,7 +103,7 @@ async function startCamera(): Promise<void> {
       isCameraReady.value = true
     }
   } catch {
-    cameraError.value = '카메라 권한을 얻지 못했습니다. 업로드나 기본 테스트 이미지를 사용하세요.'
+    cameraError.value = '카메라 권한을 얻지 못했습니다. 업로드를 사용하세요.'
   }
 }
 
@@ -141,7 +141,7 @@ async function analyzeAndRun(input: Blob | string): Promise<void> {
     captureOpen.value = false
     stopCamera()
   } catch {
-    statusMessage.value = '이미지를 분석하지 못했습니다. 더 밝은 배경의 사진이나 기본 테스트 이미지를 사용하세요.'
+    statusMessage.value = '이미지를 분석하지 못했습니다. 더 밝은 배경의 사진을 촬영하거나 업로드하세요.'
   } finally {
     isAnalyzing.value = false
   }
@@ -159,19 +159,13 @@ async function handleUpload(event: Event): Promise<void> {
   input.value = ''
 }
 
-async function runSample(): Promise<void> {
-  await analyzeAndRun(getSampleImagePath())
+async function reopenCapture(): Promise<void> {
+  await openCapture()
 }
 
 function closeCapture(): void {
   captureOpen.value = false
   stopCamera()
-}
-
-function resetCode(): void {
-  sourceCode.value = defaultProgramSource
-  parseIssues.value = []
-  statusMessage.value = '기본 조건문으로 되돌렸습니다.'
 }
 
 function stopCamera(): void {
@@ -328,7 +322,7 @@ onBeforeUnmount(() => {
     </section>
 
     <div class="run-bar" :class="{ docked: !analysis }">
-      <button type="button" class="secondary-button" aria-label="기본 코드로 되돌리기" @click="resetCode">
+      <button type="button" class="secondary-button" aria-label="다시 촬영하기" :disabled="isAnalyzing" @click="reopenCapture">
         <RotateCcw :size="20" />
       </button>
       <button type="button" class="run-button" :disabled="isAnalyzing" @click="openCapture">
@@ -367,10 +361,6 @@ onBeforeUnmount(() => {
           업로드
           <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,image/*" :disabled="isAnalyzing" @change="handleUpload" />
         </label>
-        <button type="button" class="secondary-action" :disabled="isAnalyzing" @click="runSample">
-          <Image :size="19" />
-          테스트
-        </button>
       </div>
     </section>
 

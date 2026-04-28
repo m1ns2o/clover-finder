@@ -24,7 +24,6 @@ interface OpenCvWorkerFailure {
 type OpenCvWorkerResponse = OpenCvWorkerSuccess | OpenCvWorkerFailure
 
 const opencvSource = opencvRuntimeUrl
-const sampleImagePath = '/sample-clover.svg'
 const maxAnalysisSide = 420
 const maxVisibleSide = 900
 let openCvWorker: Worker | null = null
@@ -78,10 +77,6 @@ export async function captureVideoFrame(video: HTMLVideoElement): Promise<Blob> 
       }
     }, 'image/jpeg', 0.92)
   })
-}
-
-export function getSampleImagePath(): string {
-  return sampleImagePath
 }
 
 export async function preloadOpenCv(): Promise<void> {
@@ -447,7 +442,7 @@ function makeAnalysis(
   const confidence = calculateConfidence(metrics, analyzer)
   const message = leafCount
     ? `${leafCount}개의 잎 후보를 찾았습니다.`
-    : '초록 잎 영역을 찾지 못했습니다. 테스트 이미지를 사용해 보세요.'
+    : '초록 잎 영역을 찾지 못했습니다. 더 선명한 사진을 촬영하거나 업로드하세요.'
 
   return {
     metrics,

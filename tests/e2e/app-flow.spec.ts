@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 
 const referenceThreeLeafPhoto = 'KakaoTalk_Photo_2026-04-28-10-35-11.jpeg'
 
-test('loads saved code and runs the default test image', async ({ page }) => {
+test('loads saved code and runs an uploaded sample image', async ({ page }) => {
   await page.goto('/')
   await page.evaluate(() => {
     localStorage.setItem('clover-logic-lab:python-source', [
@@ -18,13 +18,19 @@ test('loads saved code and runs the default test image', async ({ page }) => {
   await expect(page.locator('.cm-content')).toContainText('저장된 코드 통과')
   await expect(page.locator('.hint-strip span')).toHaveText(['잎_개수', '잎_크기'])
   await page.getByRole('button', { name: '실행' }).click()
-  await page.getByRole('button', { name: '테스트' }).click()
+  await expect(page.getByRole('button', { name: '테스트' })).toHaveCount(0)
+  await page.locator('input[type="file"]').setInputFiles('public/sample-clover.svg')
 
   await expect(page.locator('.result-card')).toContainText('저장된 코드 통과', { timeout: 10_000 })
   await expect(page.locator('.metrics-grid')).toContainText('잎_개수')
   await expect(page.locator('.metrics-grid')).toContainText('잎_크기')
   await expect(page.locator('.leaf-marker')).toHaveCount(4)
   await expect(page.locator('.trace-list')).toContainText('True')
+
+  await page.getByRole('button', { name: '다시 촬영하기' }).click()
+  await expect(page.locator('.capture-sheet')).toBeVisible()
+  await expect(page.locator('.cm-content')).toContainText('저장된 코드 통과')
+  await expect(page.getByRole('button', { name: '테스트' })).toHaveCount(0)
 })
 
 test('uploads an image file and keeps the app running', async ({ page }) => {
