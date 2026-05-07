@@ -44,6 +44,20 @@ test('uploads an image file and keeps the app running', async ({ page }) => {
   await expect(page.locator('.capture-sheet')).toHaveCount(0)
 })
 
+test('runs the built-in three-leaf and four-leaf samples', async ({ page }) => {
+  await page.goto('/')
+
+  await page.getByRole('button', { name: /3잎 샘플/ }).click()
+  await expect(page.locator('.result-card')).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('.metrics-grid')).toContainText('3개')
+  await expect(page.locator('.leaf-marker')).toHaveCount(3)
+
+  await page.getByRole('button', { name: /4잎 샘플/ }).click()
+  await expect(page.locator('.result-card')).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('.metrics-grid')).toContainText('4개')
+  await expect(page.locator('.leaf-marker')).toHaveCount(4)
+})
+
 test('ignores a separated stem-shaped contour', async ({ page }) => {
   const cloverWithDetachedStem = Buffer.from(`
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 900">

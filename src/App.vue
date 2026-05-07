@@ -13,10 +13,37 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed', platform: string }>
 }
 
+interface SampleImage {
+  id: 'three-leaf' | 'four-leaf'
+  title: string
+  leafLabel: string
+  description: string
+  imageUrl: string
+}
+
+const uploadInputId = 'clover-image-upload'
+const sampleImages: SampleImage[] = [
+  {
+    id: 'three-leaf',
+    title: '3잎 샘플',
+    leafLabel: '3잎',
+    description: '일반 클로버 판정 확인',
+    imageUrl: '/sample-three-leaf.svg'
+  },
+  {
+    id: 'four-leaf',
+    title: '4잎 샘플',
+    leafLabel: '4잎',
+    description: '행운 조건 판정 확인',
+    imageUrl: '/sample-four-leaf.svg'
+  }
+]
+
 const sourceCode = ref(localizeProgramSource(loadSavedCode(defaultProgramSource)))
 const parseIssues = ref<ProgramIssue[]>([])
 const runTrace = ref<RunTrace | null>(null)
 const analysis = ref<CloverAnalysis | null>(null)
+const activeSampleId = ref<SampleImage['id'] | null>(null)
 const captureOpen = ref(false)
 const installSheetOpen = ref(false)
 const installPrompt = ref<BeforeInstallPromptEvent | null>(null)
@@ -154,9 +181,18 @@ async function handleUpload(event: Event): Promise<void> {
     return
   }
 
+  activeSampleId.value = null
   statusMessage.value = `${file.name} 이미지를 준비하는 중입니다.`
   await analyzeAndRun(file)
   input.value = ''
+}
+
+async function runSample(sample: SampleImage): Promise<void> {
+  activeSampleId.value = sample.id
+  captureOpen.value = false
+  stopCamera()
+  statusMessage.value = `${sample.title} 이미지를 준비하는 중입니다.`
+  await analyzeAndRun(sample.imageUrl)
 }
 
 async function reopenCapture(): Promise<void> {
@@ -241,6 +277,15 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="app-shell">
+    <input
+      :id="uploadInputId"
+      class="sr-only"
+      type="file"
+      accept="image/png,image/jpeg,image/webp,image/svg+xml,image/*"
+      :disabled="isAnalyzing"
+      @change="handleUpload"
+    />
+
     <header class="topbar">
       <div class="brand-mark" aria-hidden="true">
         <Leaf :size="22" />
@@ -255,71 +300,122 @@ onBeforeUnmount(() => {
       </button>
     </header>
 
-    <section class="workbench">
-      <div class="coach-line">
-        <Code2 :size="18" />
-        <span>잎_개수와 잎_크기만 사용해 조건을 작성하세요.</span>
-      </div>
-      <p class="status-line">{{ statusMessage }}</p>
-
-      <CodeEditor v-model="sourceCode" :issues="parseIssues" />
-
-      <div class="hint-strip" aria-label="사용 가능한 변수">
-        <span>잎_개수</span>
-        <span>잎_크기</span>
-      </div>
-    </section>
-
-    <section v-if="analysis && runTrace" class="result-panel" aria-live="polite">
-      <div class="result-card" :class="{ positive: isPositiveResult }">
-        <component :is="isPositiveResult ? CheckCircle2 : XCircle" :size="24" />
-        <div>
-          <p>실행 결과</p>
-          <strong>{{ selectedResult }}</strong>
+    <div class="workspace-grid">
+      <section class="workbench">
+        <div class="coach-line">
+          <Code2 :size="18" />
+          <span>잎_개수와 잎_크기만 사용해 조건을 작성하세요.</span>
         </div>
-      </div>
+        <p class="status-line">{{ statusMessage }}</p>
 
-      <div class="result-image-frame" :style="{ aspectRatio: `${analysis.imageWidth} / ${analysis.imageHeight}` }">
-        <img :src="analysis.imageUrl" alt="분석에 사용한 클로버 이미지" class="result-image" />
-        <span
-          v-for="(region, index) in analysis.regions"
-          :key="region.id"
-          class="leaf-marker"
-          :style="{
-            left: `${region.xPercent}%`,
-            top: `${region.yPercent}%`,
-            width: `${region.radiusPercent * 2}%`
-          }"
-          :aria-label="`${index + 1}번 잎 후보`"
-        >
-          <span>{{ index + 1 }}</span>
-        </span>
-      </div>
+        <CodeEditor v-model="sourceCode" :issues="parseIssues" />
 
-      <div class="metrics-grid">
-        <div v-for="[label, value] in metricsRows" :key="label">
-          <span>{{ label }}</span>
-          <strong>{{ value }}</strong>
+        <div class="hint-strip" aria-label="사용 가능한 변수">
+          <span>잎_개수</span>
+          <span>잎_크기</span>
         </div>
-      </div>
+      </section>
 
-      <ol class="trace-list" aria-label="조건문 실행 흐름">
-        <li
-          v-for="evaluation in runTrace.evaluations"
-          :key="evaluation.branchId"
-          :class="{ passed: evaluation.passed, skipped: evaluation.skipped }"
-        >
-          <span>{{ evaluation.label }}</span>
-          <code>{{ evaluation.conditionSource || 'else' }}</code>
-          <b>{{ evaluation.skipped ? '건너뜀' : evaluation.passed ? 'True' : 'False' }}</b>
-        </li>
-      </ol>
+      <aside class="side-stack" aria-label="클로버 테스트와 결과">
+        <section class="test-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>테스트</h2>
+              <p>카메라 없이 이미지 파일이나 샘플로 바로 실행할 수 있습니다.</p>
+            </div>
+          </div>
 
-      <p class="analysis-note">
-        {{ statusMessage }} · {{ analysis.analyzer === 'opencv' ? 'OpenCV.js' : 'Canvas fallback' }}
-        · confidence {{ Math.round(analysis.confidence * 100) }}%
-      </p>
-    </section>
+          <label class="upload-dropzone" :class="{ disabled: isAnalyzing }" :for="uploadInputId" :aria-disabled="isAnalyzing">
+            <Upload :size="22" />
+            <span>
+              <strong>이미지 파일 업로드</strong>
+              <small>PNG, JPG, WebP, SVG 파일을 선택하세요.</small>
+            </span>
+          </label>
+
+          <div class="sample-grid" aria-label="샘플 이미지">
+            <button
+              v-for="sample in sampleImages"
+              :key="sample.id"
+              type="button"
+              class="sample-card"
+              :class="{ active: activeSampleId === sample.id }"
+              :disabled="isAnalyzing"
+              @click="runSample(sample)"
+            >
+              <img :src="sample.imageUrl" :alt="`${sample.title} 이미지`" />
+              <span>
+                <b>{{ sample.leafLabel }}</b>
+                <strong>{{ sample.title }}</strong>
+                <small>{{ sample.description }}</small>
+              </span>
+            </button>
+          </div>
+
+          <button type="button" class="camera-link-button" :disabled="isAnalyzing" @click="openCapture">
+            <Camera :size="19" />
+            카메라로 촬영
+          </button>
+        </section>
+
+        <section v-if="analysis && runTrace" class="result-panel" aria-live="polite">
+          <div class="result-card" :class="{ positive: isPositiveResult }">
+            <component :is="isPositiveResult ? CheckCircle2 : XCircle" :size="24" />
+            <div>
+              <p>실행 결과</p>
+              <strong>{{ selectedResult }}</strong>
+            </div>
+          </div>
+
+          <div class="result-image-frame" :style="{ aspectRatio: `${analysis.imageWidth} / ${analysis.imageHeight}` }">
+            <img :src="analysis.imageUrl" alt="분석에 사용한 클로버 이미지" class="result-image" />
+            <span
+              v-for="(region, index) in analysis.regions"
+              :key="region.id"
+              class="leaf-marker"
+              :style="{
+                left: `${region.xPercent}%`,
+                top: `${region.yPercent}%`,
+                width: `${region.radiusPercent * 2}%`
+              }"
+              :aria-label="`${index + 1}번 잎 후보`"
+            >
+              <span>{{ index + 1 }}</span>
+            </span>
+          </div>
+
+          <div class="metrics-grid">
+            <div v-for="[label, value] in metricsRows" :key="label">
+              <span>{{ label }}</span>
+              <strong>{{ value }}</strong>
+            </div>
+          </div>
+
+          <ol class="trace-list" aria-label="조건문 실행 흐름">
+            <li
+              v-for="evaluation in runTrace.evaluations"
+              :key="evaluation.branchId"
+              :class="{ passed: evaluation.passed, skipped: evaluation.skipped }"
+            >
+              <span>{{ evaluation.label }}</span>
+              <code>{{ evaluation.conditionSource || 'else' }}</code>
+              <b>{{ evaluation.skipped ? '건너뜀' : evaluation.passed ? 'True' : 'False' }}</b>
+            </li>
+          </ol>
+
+          <p class="analysis-note">
+            {{ statusMessage }} · {{ analysis.analyzer === 'opencv' ? 'OpenCV.js' : 'Canvas fallback' }}
+            · confidence {{ Math.round(analysis.confidence * 100) }}%
+          </p>
+        </section>
+
+        <section v-else class="result-placeholder" aria-label="분석 대기">
+          <Leaf :size="34" />
+          <h2>아직 분석 결과가 없습니다.</h2>
+          <p>왼쪽 코드를 확인한 뒤 업로드 또는 샘플을 실행하면 잎 후보와 조건문 흐름이 여기에 표시됩니다.</p>
+        </section>
+      </aside>
+    </div>
 
     <div class="run-bar" :class="{ docked: !analysis }">
       <button type="button" class="secondary-button" aria-label="다시 촬영하기" :disabled="isAnalyzing" @click="reopenCapture">
@@ -356,10 +452,9 @@ onBeforeUnmount(() => {
           <Camera :size="20" />
           촬영
         </button>
-        <label class="secondary-action upload-action" :class="{ disabled: isAnalyzing }">
+        <label class="secondary-action upload-action" :class="{ disabled: isAnalyzing }" :for="uploadInputId" :aria-disabled="isAnalyzing">
           <Upload :size="19" />
           업로드
-          <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,image/*" :disabled="isAnalyzing" @change="handleUpload" />
         </label>
       </div>
     </section>
