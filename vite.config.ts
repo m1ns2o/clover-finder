@@ -8,7 +8,7 @@ export default defineConfig({
     vue(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'sample-clover.svg'],
+      includeAssets: ['favicon.svg', 'KakaoTalk_Photo_2026-04-28-10-35-11.jpeg', 'istockphoto-2195234499-612x612.jpg'],
       manifest: {
         id: '/',
         name: 'Clover Logic Lab',
@@ -83,8 +83,9 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,webmanifest}'],
-        globIgnores: ['**/opencv-*.js']
+        globPatterns: ['**/*.{js,css,html,svg,png,jpg,jpeg,webmanifest}'],
+        globIgnores: ['**/opencv-*.js'],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024
       }
     })
   ],

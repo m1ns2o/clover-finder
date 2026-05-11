@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { existsSync } from 'node:fs'
 
-const referenceThreeLeafPhoto = 'KakaoTalk_Photo_2026-04-28-10-35-11.jpeg'
+const referenceThreeLeafPhoto = 'public/KakaoTalk_Photo_2026-04-28-10-35-11.jpeg'
+const referenceFourLeafPhoto = 'public/istockphoto-2195234499-612x612.jpg'
 
 test('loads saved code and runs an uploaded sample image', async ({ page }) => {
   await page.goto('/')
@@ -19,7 +20,7 @@ test('loads saved code and runs an uploaded sample image', async ({ page }) => {
   await expect(page.locator('.hint-strip span')).toHaveText(['잎_개수', '잎_크기'])
   await page.getByRole('button', { name: '실행' }).click()
   await expect(page.getByRole('button', { name: '테스트' })).toHaveCount(0)
-  await page.locator('input[type="file"]').setInputFiles('public/sample-clover.svg')
+  await page.locator('input[type="file"]').setInputFiles(referenceFourLeafPhoto)
 
   await expect(page.locator('.result-card')).toContainText('저장된 코드 통과', { timeout: 10_000 })
   await expect(page.locator('.metrics-grid')).toContainText('잎_개수')
@@ -36,7 +37,7 @@ test('loads saved code and runs an uploaded sample image', async ({ page }) => {
 test('uploads an image file and keeps the app running', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: '실행' }).click()
-  await page.locator('input[type="file"]').setInputFiles('public/sample-clover.svg')
+  await page.locator('input[type="file"]').setInputFiles(referenceFourLeafPhoto)
 
   await expect(page.locator('.result-card')).toBeVisible({ timeout: 10_000 })
   await expect(page.locator('.metrics-grid')).toContainText('잎_개수')

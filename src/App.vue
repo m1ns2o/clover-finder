@@ -28,14 +28,14 @@ const sampleImages: SampleImage[] = [
     title: '3잎 샘플',
     leafLabel: '3잎',
     description: '일반 클로버 판정 확인',
-    imageUrl: '/sample-three-leaf.svg'
+    imageUrl: '/KakaoTalk_Photo_2026-04-28-10-35-11.jpeg'
   },
   {
     id: 'four-leaf',
     title: '4잎 샘플',
     leafLabel: '4잎',
     description: '행운 조건 판정 확인',
-    imageUrl: '/sample-four-leaf.svg'
+    imageUrl: '/istockphoto-2195234499-612x612.jpg'
   }
 ]
 
